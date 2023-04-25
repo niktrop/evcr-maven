@@ -1,0 +1,153 @@
+// CUP specification for a simple expression evaluator (w/ actions)
+
+import java_cup.runtime.*;
+
+/* Preliminaries to set up and use the scanner.  */
+/*
+init with {: scanner.init();              :};
+scan with {: return scanner.next_token(); :};
+*/
+
+/* Terminals (tokens returned by the scanner). */
+terminal LAMBDA,DOT,EQUAL,LET,IN,SEMI,SEMISEMI,COMMA,CAT,CAT_SYM,STR,ADD_SYM,SUB_SYM,MUL_SYM,
+         DIV_SYM,AND_SYM,OR_SYM,LT_SYM,GT_SYM,LE_SYM,GE_SYM,EQ_SYM,ADD,SUB,MUL,DIV,AND,OR,
+         NOT,LT,GT,LE,GE,EQ,PRINTLN,LROUND,RROUND,LSQUARE,RSQUARE,LCURLY,RCURLY,QMARK,
+         PRIMIF,IF,ELSE;
+terminal           CLASS,EXTENDS,OBJECT,NEW,RETURN,CALL,CALL_SUPER;
+terminal           ARROW,WEDGE,COLON;
+terminal String    IDENT;
+terminal Boolean   BOOL;
+terminal Integer   INT;
+terminal Double    REAL;
+terminal String    STRING;
+terminal           VOID,EMPTYREC;
+
+/* Non-terminals */
+non terminal Object     program;
+non terminal Term       term, abit, appl;
+non terminal Term.Value value, atom, xvalue;
+non terminal            scope, ldot, map, sep;
+
+/* Precedences */
+precedence right WEDGE;
+
+precedence left OR_SYM;
+precedence left AND_SYM;
+precedence left CAT_SYM;
+precedence left EQ_SYM, LT_SYM, GT_SYM, LE_SYM, GE_SYM;
+precedence left ADD_SYM, SUB_SYM;
+precedence left MUL_SYM, DIV_SYM;
+
+/* The grammar */
+
+
+program ::= term:t SEMISEMI                         {: RESULT = t; :}
+          ;
+
+term    ::= appl:t                                  {: RESULT = t; :}
+ | term:s ADD_SYM term:t     {: RESULT = new Term.Application(new Term.PlusFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s SUB_SYM term:t     {: RESULT = new Term.Application(new Term.MinusFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s MUL_SYM term:t     {: RESULT = new Term.Application(new Term.MulFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s DIV_SYM term:t     {: RESULT = new Term.Application(new Term.DivFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s AND_SYM term:t     {: RESULT = new Term.Application(new Term.AndFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s OR_SYM term:t      {: RESULT = new Term.Application(new Term.OrFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s LT_SYM term:t      {: RESULT = new Term.Application(new Term.LtFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s GT_SYM term:t      {: RESULT = new Term.Application(new Term.GtFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s LE_SYM term:t      {: RESULT = new Term.Application(new Term.LeFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s GE_SYM term:t      {: RESULT = new Term.Application(new Term.GeFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s EQ_SYM term:t      {: RESULT = new Term.Application(new Term.EqFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | term:s CAT_SYM term:t     {: RESULT = new Term.Application(new Term.CatFunction(),
+                                                                  Term.Encode.Pair(s,t)); :}
+ | IF LROUND term:c RROUND term:a ELSE term:b {:
+                         // $primif (\f.f c (\x.a) (\x.b)) ()
+                           Term.Variable f = new Term.Variable();
+                           RESULT = new Term.Application(
+                               new Term.Application(
+                                   new Term.PrimIfFunction(),
+                                   new Term.Abstraction(
+                                       f,
+                                       new Term.Application(
+                                           new Term.Application(
+                                               new Term.Application(f,c),
+                                               new Term.Abstraction(new Term.Variable(), a)
+                                           ),
+                                           new Term.Abstraction(new Term.Variable(), b)
+                                       )
+                                   )
+                               ),
+                               new Term.Void()
+                           );
+                         :}
+ | xvalue:t                                {: RESULT = t; :}
+ | LET IDENT:x EQUAL term:s scope term:t
+   {: RESULT = new Term.Application(new Term.Abstraction(new Term.Variable(x),t),s, true); :}
+ ;
+
+
+scope   ::= IN | SEMI;
+ldot    ::= DOT | ARROW;
+map     ::= ARROW | EQUAL;
+sep     ::= WEDGE | COMMA;
+
+appl    ::= appl:s abit:t                           {: RESULT = new Term.Application(s,t); :}
+          | abit:t                                  {: RESULT = t; :}
+          ;
+
+abit    ::= atom:t                                {: RESULT = t; :}
+ | LROUND term:s COMMA term:t RROUND              {: RESULT = Term.Encode.Pair(s,t); :}
+ | LROUND term:s COMMA term:t COMMA term:u RROUND {: RESULT = Term.Encode.Tripple(s,t,u); :}
+ | LROUND term:t RROUND                           {: RESULT = t; :}
+ | LCURLY term:t RCURLY                           {: RESULT = t; :}
+		  ;
+
+value   ::= atom:t                                  {: RESULT = t; :}
+          | xvalue:t                                {: RESULT = t; :}
+          ;
+
+/* complex values */
+xvalue  ::= LAMBDA IDENT:x ldot term:t
+            {: RESULT = new Term.Abstraction(new Term.Variable(x),t); :}
+          | DOT IDENT:l map term:s sep value:v
+            {: RESULT = new Term.Extension(new Term.Label(l),s,v); :}
+          | IDENT:l EQUAL term:s COMMA value:v
+            {: RESULT = new Term.Extension(new Term.Label(l),s,v); :}
+          ;
+
+/* variables and constants */
+atom    ::= IDENT:x          {: RESULT = new Term.Variable(x); :}
+          | DOT IDENT:x      {: RESULT = new Term.Label(x); :}
+          | INT:i            {: RESULT = new Term.Int(i.intValue()); :}
+          | REAL:r           {: RESULT = new Term.Real(r.doubleValue()); :}
+          | STRING:s         {: RESULT = new Term.Str(s); :}
+          | BOOL:b           {: RESULT = new Term.Bool(b.booleanValue()); :}
+          | VOID             {: RESULT = new Term.Void(); :}
+          | EMPTYREC         {: RESULT = new Term.Void(); :}
+          | PRIMIF           {: RESULT = new Term.PrimIfFunction(); :}
+          | CAT              {: RESULT = new Term.CatFunction(); :}
+          | STR              {: RESULT = new Term.StrFunction(); :}
+          | ADD              {: RESULT = new Term.PlusFunction(); :}
+          | SUB              {: RESULT = new Term.MinusFunction(); :}
+          | MUL              {: RESULT = new Term.MulFunction(); :}
+          | DIV              {: RESULT = new Term.DivFunction(); :}
+          | AND              {: RESULT = new Term.AndFunction(); :}
+          | OR               {: RESULT = new Term.OrFunction(); :}
+          | NOT              {: RESULT = new Term.NotFunction(); :}
+          | LT               {: RESULT = new Term.LtFunction(); :}
+          | GT               {: RESULT = new Term.GtFunction(); :}
+          | LE               {: RESULT = new Term.LeFunction(); :}
+          | GE               {: RESULT = new Term.GeFunction(); :}
+          | EQ               {: RESULT = new Term.EqFunction(); :}
+          | PRINTLN          {: RESULT = new Term.PrintlnFunction(); :}
+          ;
+
